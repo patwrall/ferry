@@ -329,11 +329,12 @@ fn populate(
     let base_tree = ctx.repo.ls_tree(&base.commit)?;
     let index = git::ls_files(&meta.worktree)?;
     let plan = freshness::plan(&base_tree, &base_paths.src, &index, &meta.worktree)?;
-    let differing = plan
+    let differing: Vec<String> = plan
         .skipped()
         .iter()
         .filter(|(_, reason)| *reason != freshness::SkipReason::NotRegularFile)
-        .count();
+        .map(|(path, reason)| format!("{} ({reason:?})", path.display()))
+        .collect();
     meta.stamp = freshness::apply(&plan)?;
     // Checkout gives differing files the current time, but a hook restoring
     // commit times, or clock skew, can leave them older than the base's
@@ -341,11 +342,13 @@ fn populate(
     let after_base = UNIX_EPOCH + Duration::from_secs(base.created_unix + 1);
     freshness::freshen_skipped(&plan, after_base.max(SystemTime::now()))?;
     git::refresh_index(&meta.worktree)?;
-    if differing > 0 {
+    if !differing.is_empty() {
         warnings.push(format!(
-            "{differing} of {} tracked files differ from base {} (or are reached through a symlink that changed); crates using them rebuild on the first build{}",
+            "{} of {} tracked files differ from base {} (or are reached through a symlink that changed); crates using them rebuild on the first build: {}{}",
+            differing.len(),
             meta.stamp.tracked,
             base.id.short(),
+            summarize_paths(&differing),
             other_commit_hint(ctx, base, &meta.from)?
         ));
     }
@@ -377,6 +380,16 @@ fn populate(
     meta.state = AgentState::Ready;
     fsutil::write_json_atomic(&paths.meta, &*meta)?;
     Ok((choice.reason, stats))
+}
+
+/// The first few of `paths`, comma separated, with a count of the rest.
+fn summarize_paths(paths: &[String]) -> String {
+    const SHOWN: usize = 10;
+    let mut text = paths[..paths.len().min(SHOWN)].join(", ");
+    if paths.len() > SHOWN {
+        text = format!("{text}, and {} more", paths.len() - SHOWN);
+    }
+    text
 }
 
 /// Gives the agent the base's `Cargo.lock` when the repository does not
