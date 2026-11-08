@@ -54,6 +54,10 @@ fn a_file_that_differs_from_the_base_keeps_its_mtime() {
         "{report}"
     );
     assert_ne!(report["warnings"], serde_json::json!([]), "{report}");
+    assert!(
+        report["warnings"].to_string().contains("side/src/lib.rs"),
+        "the warning must name the file that differs: {report}"
+    );
 
     let changed = worktree.join("side/src/lib.rs");
     assert!(!is_stamped(&changed));
